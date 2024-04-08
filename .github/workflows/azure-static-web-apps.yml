@@ -1,0 +1,69 @@
+name: PROD - Upload To Azure Blob Storage
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        type: string
+        description: 'Specify release/tag. Format: x.y.z'
+        required: true
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches:
+      - develop-sso
+jobs:
+  Upload-PROD:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get commit on main branch
+        id: get_commit
+        run: echo "::set-output name=commit::$(git rev-parse HEAD)"
+      - name: Create tags and Push tags
+        run: |
+          git tag ${{ inputs.version }} ${{ steps.get_commit.outputs.commit }}
+          git push --tags
+      - name: Create Release and add release note
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ inputs.version }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+
+  deploy_to_azure_static_web_app:
+    name: Build to Azure Static Web Apps
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+          lfs: false
+      - name: Build to Azure Static Web Apps
+        id: builddeploy
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_DEV }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }} # Used for GitHub integrations (i.e. PR comments)
+          action: "upload"
+          ###### Repository/Build Configurations ######
+          app_location: ".output/public" # App source code path relative to repository root
+          api_location: "" # Api source code path relative to repository root - optional
+          # skip_app_build: true
+          output_location: ".output/public" # Built app content directory, relative to app_location - optional
+          ###### End of Repository/Build Configurations ######
+
+
+  close_pull_request_job:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    name: Close Pull Request Job
+    steps:
+      - name: Close Pull Request
+        id: closepullrequest
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: "close"
